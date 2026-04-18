@@ -38,13 +38,13 @@ Este servicio resuelve el problema **invirtiendo el flujo**: tomás el `lat/lng`
 | [`@turf/helpers`](https://turfjs.org/docs/api/point) | Helpers para construir features GeoJSON (`point()`, etc.). |
 | [`csv-parse`](https://csv.js.org/parse/) | Parser de CSV para leer el catálogo AGEEML de municipios. |
 
-### Herramienta externa (solo preprocesamiento)
+### Herramienta externa (solo si agregás estados nuevos)
 
 | Herramienta | Versión | Para qué |
 |---|---|---|
 | **GDAL (`ogr2ogr`)** | 3.12 | **Reproyecta** los shapefiles del INEGI de Lambert Conformal Conic (México ITRF2008) a WGS84 y los convierte a GeoJSON. Es el estándar de la industria geoespacial. |
 
-> `ogr2ogr` solo se usa UNA VEZ en preprocesamiento. El servidor en runtime no lo necesita.
+> **Opcional.** Si solo vas a correr el servicio con los estados ya incluidos (Colima + Jalisco), no necesitás GDAL — los GeoJSONs procesados ya están en el repo. Solo hace falta si vas a agregar un estado nuevo o actualizar la data del INEGI.
 
 ### Verificar que todo está instalado
 
@@ -70,15 +70,17 @@ brew install gdal
 npm install
 ```
 
-### 2. Preprocesar los shapefiles (una sola vez)
+### 2. Preprocesar los shapefiles (solo si agregás estados nuevos)
 
-Convierte los `.shp` de INEGI (en Lambert Conformal Conic, proyección mexicana) a GeoJSON en WGS84, y copia el catálogo AGEEML a `data/catalogs/`.
+> **Si clonaste el repo y solo querés correr el servicio, saltá al paso 3.** Los GeoJSONs procesados ya están en `data/geojson/` committeados en el repo.
+
+Este paso solo hace falta cuando **agregás un estado nuevo** o **actualizás la data del INEGI**. Requiere GDAL (`brew install gdal`) y los SHPs crudos en `data/raw/`.
 
 ```bash
 npm run preprocess
 ```
 
-Al terminar tenés en `data/geojson/`:
+Convierte los `.shp` de INEGI (Lambert CCL) a GeoJSON en WGS84 y copia el catálogo AGEEML. Al terminar tenés en `data/geojson/`:
 
 | Archivo | Contenido | Polígonos |
 |---|---|---|
@@ -93,7 +95,7 @@ Y en `data/catalogs/`:
 |---|---|
 | `municipios.csv` | Catálogo AGEEML nacional (2,478 municipios de todo México) |
 
-> Re-ejecutá el preproceso solo si **bajás shapefiles nuevos** o **actualizás el catálogo**. Es idempotente.
+Ver sección [Agregar más estados](#agregar-más-estados-o-localidades) para el flujo completo.
 
 ### 3. Compilar y levantar el servidor
 
@@ -309,28 +311,31 @@ geolocalizar_inegi_coordenadas/
 │           └── reverse-geocode-response.dto.ts  # DTO + MatchLevel enum
 │
 ├── data/                              # toda la data del proyecto
-│   ├── raw/                           # descargas crudas del INEGI (manual)
+│   ├── raw/                           # (LOCAL ONLY — gitignored)
+│   │   │                              # descargas crudas del INEGI que cada dev baja manualmente
 │   │   ├── 06_colima_colonias/        # SHP de asentamientos Colima
 │   │   ├── 06_colima_geoestadistico/  # SHP de municipios Colima (Marco Geoestadístico)
 │   │   ├── 14_jalisco_colonias/       # SHP de asentamientos Jalisco
 │   │   ├── 14_jalisco_geoestadistico/ # SHP de municipios Jalisco (Marco Geoestadístico)
 │   │   └── catun_municipio/           # catálogo AGEEML crudo
-│   ├── geojson/                       # generado por preprocess.sh
+│   ├── geojson/                       # (COMMITTEADO) generado por preprocess.sh
 │   │   ├── 06as.geojson               # asentamientos Colima
 │   │   ├── 14as.geojson               # asentamientos Jalisco
 │   │   ├── 06mun.geojson              # municipios Colima (fallback)
 │   │   └── 14mun.geojson              # municipios Jalisco (fallback)
-│   └── catalogs/                      # generado por preprocess.sh
+│   └── catalogs/                      # (COMMITTEADO) generado por preprocess.sh
 │       └── municipios.csv             # AGEEML (nombres de municipios)
 │
-├── dist/                              # generado por `npm run build`
+├── dist/                              # generado por `npm run build` (gitignored)
 │
-└── .gitignore                         # ignora data/raw, data/geojson, data/catalogs, dist, node_modules
+└── .gitignore                         # ignora data/raw/, dist/, node_modules/, .env, caches de IDE
 ```
 
 > **Subdivisión de `data/`:**
-> - `data/raw/` → descargas manuales del INEGI (vos las bajás). Contenido mínimo por carpeta: `NNas.shp` + sidecars para colonias, `NNmun.shp` + sidecars para municipios. Todo lo demás (PDFs, XMLs, catálogos redundantes, capas que no usamos) se puede borrar.
-> - `data/geojson/` y `data/catalogs/` → auto-generados por `npm run preprocess`. **No editar a mano.**
+> - **`data/raw/`** → `gitignored`, **solo local**. Descargas manuales del INEGI. Contenido mínimo por carpeta: `NNas.shp` + sidecars para colonias, `NNmun.shp` + sidecars para municipios. Todo lo demás (PDFs, XMLs, catálogos redundantes, capas que no usamos) se puede borrar.
+> - **`data/geojson/` y `data/catalogs/`** → **committeados al repo**. Auto-generados por `npm run preprocess` (solo el dev que agrega un estado corre el preprocess; los demás solo clonan). **No editar a mano.**
+>
+> Esta separación permite que cualquiera clone y arranque con `npm install && npm run build && npm start` sin instalar GDAL ni bajar nada del INEGI.
 
 ---
 
@@ -581,29 +586,68 @@ Cualquier dev nuevo solo corre `npm install` + baja los SHPs del INEGI en `data/
 
 ---
 
-## Agregar más estados
+## Agregar más estados o localidades
 
-Cuando quieras cubrir más estados (por ejemplo CDMX = `09`):
+### Estrategia de data en este repo
 
-1. **Bajar los shapefiles del INEGI:**
-   - *Delimitación de colonias y otros asentamientos humanos 2025* → descargar carpeta del estado (ej. `09_ciudad_de_mexico/`).
-   - *Marco Geoestadístico* → descargar carpeta del estado para tener `09mun.shp`.
-2. **Colocarlos bajo `data/raw/`** siguiendo la convención:
-   ```
-   data/raw/09_cdmx_colonias/conjunto_de_datos/09as.shp
-   data/raw/09_cdmx_geoestadistico/conjunto_de_datos/09mun.shp
-   ```
-   Y podés borrar todo lo demás que venga en esas descargas (PDFs, XMLs, otras capas como `loc`, `ageb`, `mza`). Nos quedamos solo con `NNas` + `NNmun` + sus sidecars (`.dbf`, `.shx`, `.prj`, `.cpg`).
-3. **Actualizar `scripts/preprocess.sh`** — agregar variables `CDMX_SHP`, `CDMX_MUN_SHP`, los bloques de `ogr2ogr` y los `echo` de conteos.
-4. **Actualizar `src/inegi/inegi-loader.service.ts`** — agregar los archivos a los arreglos `asSources` y `munSources` dentro de `onModuleInit`.
-5. **Re-correr:**
-   ```bash
-   npm run preprocess
-   npm run build
-   npm start
-   ```
+Solo versionamos los archivos **procesados** (`data/geojson/` + `data/catalogs/`). Los SHPs crudos del INEGI viven en `data/raw/`, que **está en `.gitignore`** — cada dev los baja localmente, corre `npm run preprocess`, y solo los GeoJSONs generados terminan en el commit.
 
-> No hay que tocar el service ni el controller. La lógica ya es agnóstica al estado.
+**¿Por qué?** Los SHPs crudos son grandes y cambian poco. Los GeoJSONs procesados son chicos, reproducibles, y permiten que cualquiera clone el repo y arranque con `npm install && npm run build && npm start` — sin GDAL, sin bajar nada del INEGI.
+
+### Flujo para agregar un estado nuevo (ejemplo CDMX = `09`)
+
+#### 1. Bajá los shapefiles del INEGI (local)
+
+- *Delimitación de colonias y otros asentamientos humanos 2025* → descargar carpeta del estado.
+- *Marco Geoestadístico* → descargar carpeta del estado para tener `09mun.shp`.
+
+#### 2. Colocalos bajo `data/raw/` (local, no se committea)
+
+```
+data/raw/09_cdmx_colonias/conjunto_de_datos/09as.shp (+ .dbf .shx .prj)
+data/raw/09_cdmx_geoestadistico/conjunto_de_datos/09mun.shp (+ sidecars)
+```
+
+Podés borrar todo lo demás (PDFs, XMLs, otras capas como `loc`, `ageb`, `mza`). Nos quedamos solo con `NNas` + `NNmun` + sus sidecars (`.dbf`, `.shx`, `.prj`, `.cpg`).
+
+#### 3. Actualizá el código
+
+- **`scripts/preprocess.sh`** → agregar variables `CDMX_SHP`, `CDMX_MUN_SHP`, bloques de `ogr2ogr`, y `echo` de conteos.
+- **`src/inegi/inegi-loader.service.ts`** → agregar los archivos a los arreglos `asSources` y `munSources` dentro de `onModuleInit`.
+
+#### 4. Corré el preproceso local (requiere GDAL)
+
+```bash
+npm run preprocess
+```
+
+Esto genera `data/geojson/09as.geojson` y `data/geojson/09mun.geojson`.
+
+#### 5. Verificá que arranca
+
+```bash
+npm run build
+npm start
+curl -X POST http://localhost:3100/reverse-geocode \
+  -H "Content-Type: application/json" \
+  -d '{"lat": ..., "lng": ...}'   # coord del estado nuevo
+```
+
+#### 6. Committeá SOLO los archivos procesados + los cambios de código
+
+```bash
+git add scripts/preprocess.sh \
+        src/inegi/inegi-loader.service.ts \
+        data/geojson/09as.geojson \
+        data/geojson/09mun.geojson
+
+git commit -m "feat(data): agregar cobertura de CDMX"
+git push origin main
+```
+
+**Clave:** `data/raw/` NO se committea (está gitignored). Esto mantiene el repo chico y evita redistribuir los SHPs crudos del INEGI.
+
+> No hay que tocar el service ni el controller más allá de los arreglos de sources. La lógica de resolución ya es agnóstica al estado.
 
 ---
 
@@ -620,4 +664,9 @@ Cuando quieras cubrir más estados (por ejemplo CDMX = `09`):
 
 ## Licencia de la data
 
-Los datos usados son propiedad del **INEGI** bajo los [Términos de libre uso de la información del INEGI](https://www.inegi.org.mx/inegi/terminos.html). Este repositorio contiene solo código (no redistribuye los archivos crudos del INEGI).
+Los datos usados son propiedad del **INEGI** bajo los [Términos de libre uso de la información del INEGI](https://www.inegi.org.mx/inegi/terminos.html), que permiten uso y redistribución citando la fuente. Este repositorio:
+
+- **NO redistribuye** los SHPs crudos del INEGI (`data/raw/` está gitignored).
+- **SÍ incluye** los GeoJSONs derivados (`data/geojson/`) y el catálogo AGEEML (`data/catalogs/`) — ambos son transformaciones/subconjuntos de la data original y están cubiertos por los términos del INEGI.
+
+La fuente oficial es <https://www.inegi.org.mx/app/mapas/?t=0>.

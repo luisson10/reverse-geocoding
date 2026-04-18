@@ -4,11 +4,10 @@ node_modules/
 # Build output
 dist/
 
-# Runtime data (regenerable)
-data/geojson/
-data/catalogs/
-
-# Raw INEGI data (downloaded manually, not committable due to size and licensing)
+# Raw INEGI data — stays local, not committed.
+# We only commit the PROCESSED outputs (data/geojson/, data/catalogs/)
+# so anyone cloning can run the service without re-downloading from
+# inegi.org.mx or installing GDAL.
 data/raw/
 
 # Environment
@@ -20,6 +19,9 @@ data/raw/
 .DS_Store
 *.swp
 *.swo
+.cursor/
+.idea/
+.vscode/
 
 # Logs
 *.log
