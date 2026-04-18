@@ -651,6 +651,98 @@ git push origin main
 
 ---
 
+## Deploy a Railway
+
+Esta branch (`railway-deployment`) está configurada para desplegar en [Railway](https://railway.app) usando **Nixpacks** (el builder nativo de Railway para Node.js).
+
+### Archivos de configuración
+
+| Archivo | Para qué |
+|---|---|
+| `railway.json` | Define healthcheck (`/health`), start command (`npm start`) y política de restart |
+| `nixpacks.toml` | Pin de Node.js 22 para builds reproducibles. El resto (install + build) lo detecta Nixpacks desde `package.json` |
+| `package.json → "engines"` | Mínimo `node >= 20` |
+
+### Por qué Railway no necesita GDAL
+
+Como `data/geojson/` y `data/catalogs/` están committeados al repo (versión lean, solo procesados), Railway solo corre:
+
+```
+npm ci → npm run build → npm start
+```
+
+**No instala GDAL, no reproyecta shapefiles, no corre preprocess.** Build rápido (~45s) y reproducible.
+
+### Pasos para hacer el deploy
+
+#### 1. Empujar la branch al repo de GitHub
+
+```bash
+git push -u github railway-deployment
+```
+
+> Asumimos que tenés un remote `github` apuntando a `https://github.com/luisson10/reverse-geocoding.git`.
+
+#### 2. En el dashboard de Railway
+
+1. **New Project → Deploy from GitHub repo** → seleccionás `luisson10/reverse-geocoding`.
+2. En **Settings → Source**:
+   - **Branch:** `railway-deployment`
+   - **Root Directory:** `/` (default)
+3. Railway detecta Node via Nixpacks y arranca el primer deploy automáticamente.
+
+#### 3. Variables de entorno
+
+| Variable | Default | Cuándo setearla |
+|---|---|---|
+| `PORT` | Railway la inyecta sola | **No la toques.** Railway bindea el puerto interno automáticamente. |
+| `INEGI_DATA_ROOT` | `<cwd>/data` | Solo si movés la data a un volumen persistente de Railway. |
+
+#### 4. Verificar el deploy
+
+Cuando el build termine (~1-2 minutos el primer deploy, ~30s los siguientes), Railway te da una URL pública tipo `https://<tu-proyecto>.up.railway.app`. Probá:
+
+```bash
+# Healthcheck
+curl https://<tu-proyecto>.up.railway.app/health
+# {"status":"ok","polygons":8959,"munPolygons":135,"municipios":2478}
+
+# Reverse geocode
+curl -X POST https://<tu-proyecto>.up.railway.app/reverse-geocode \
+  -H "Content-Type: application/json" \
+  -d '{"lat":20.6767,"lng":-103.3475}'
+```
+
+#### 5. Logs y debugging
+
+- **Logs en vivo:** Railway dashboard → tu servicio → **Deployments → View Logs**.
+- **Build logs:** sección **Build** del mismo deployment.
+- **Métricas:** pestaña **Metrics** (CPU, RAM, red).
+
+### Troubleshooting Railway
+
+**Build falla con "Cannot find module ..."**
+Asegurate que `package-lock.json` esté committeado. Railway corre `npm ci`, que lo requiere.
+
+**Healthcheck falla con timeout**
+El boot carga ~37 MB de GeoJSON — toma 1-2s. Si tenés container chico, aumentá `healthcheckTimeout` en `railway.json` de 120 a 180.
+
+**Deploy funciona pero el servicio devuelve 404 en todos los paths**
+Verificá que estés pegando a la URL que Railway te dio en el dashboard (no `localhost`).
+
+**Queremos regenerar GeoJSONs en cada deploy**
+Agregá `gdal` al `nixpacks.toml`:
+```toml
+[phases.setup]
+nixPkgs = ["nodejs_22", "gdal"]
+
+[phases.build]
+cmds = ["npm run preprocess", "npm run build"]
+```
+(Y committeá también `data/raw/` sacándolo del `.gitignore` en esta branch.)
+
+---
+
 ## Próximos pasos
 
 - [x] Fallback a municipio cuando el punto no cae en ningún asentamiento (implementado con `NNmun.shp` del Marco Geoestadístico, expuesto vía `match_level`).
